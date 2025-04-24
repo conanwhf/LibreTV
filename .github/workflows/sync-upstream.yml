@@ -1,9 +1,9 @@
 name: Sync Fork with Upstream
 
 on:
-  # 定时触发，例如每天凌晨 0 点 UTC 时间
+  # 定时触发，例如 UTC 时间每周一早上 8:00
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * 1'
   # 也可以手动触发
   workflow_dispatch:
 
