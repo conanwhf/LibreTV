@@ -275,8 +275,8 @@
         // 保存原始 js‑sha256 实现，避免被 password.js 覆盖
         window._jsSha256 = window.sha256;
     </script>
-    <script src="https://s4.zstatic.net/ajax/libs/hls.js/1.5.6/hls.min.js" integrity="sha256-X1GmLMzVcTBRiGjEau+gxGpjRK96atNczcLBg5w6hKA=" crossorigin="anonymous"></script>
-    <script src="https://s4.zstatic.net/ajax/libs/dplayer/1.26.0/DPlayer.min.js" integrity="sha256-OJg03lDZP0NAcl3waC9OT5jEa8XZ8SM2n081Ik953o4=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js" crossorigin="anonymous"></script>
+    <script src="https://s4.zstatic.net/ajax/libs/dplayer/1.27.1/DPlayer.min.js" crossorigin="anonymous"></script>
     <script src="js/config.js"></script>
     <script src="js/password.js"></script>
 
@@ -331,6 +331,7 @@
             const urlParams = new URLSearchParams(window.location.search);
             const videoUrl = urlParams.get('url');
             const title = urlParams.get('title');
+            const sourceCode = urlParams.get('source_code');
             let index = parseInt(urlParams.get('index') || '0');
             const episodesList = urlParams.get('episodes'); // 新增：从URL获取集数信息
 
@@ -397,7 +398,7 @@
 
             // 初始化播放器
             if (videoUrl) {
-                initPlayer(videoUrl);
+                initPlayer(videoUrl, sourceCode);
                 
                 // 尝试从URL参数中恢复播放位置
                 const position = urlParams.get('position');
@@ -521,13 +522,15 @@
         }
 
         // 初始化播放器
-        function initPlayer(videoUrl) {
+        function initPlayer(videoUrl, sourceCode) {
             if (!videoUrl) return;
+
+            window.filterAdPattern = API_SITES[sourceCode].filterAdRule
 
             // 配置HLS.js选项
             const hlsConfig = {
                 debug: false,
-                loader: adFilteringEnabled ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
+                loader: (adFilteringEnabled && API_SITES[sourceCode].filterAdRule) ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
                 enableWorker: true,
                 lowLatencyMode: false,
                 backBufferLength: 90,
@@ -622,7 +625,7 @@
                                     document.getElementById('error').style.display = 'none';
                                 }
                             });
-                            
+
                             hls.loadSource(video.src);
                             hls.attachMedia(video);
                             
@@ -689,35 +692,9 @@
                             hls.on(Hls.Events.LEVEL_LOADED, function() {
                                 document.getElementById('loading').style.display = 'none';
                             });
-
-                            // --- 体验加强版：黑屏快进跳广告 ---
-                            let tmp_time_add = 0.1;
-                            const tmp_max_buffer_length = hls.config.maxBufferLength;
-                            hls.on(Hls.Events.FRAG_PARSED, (event, data) => {
-                                if (data.frag.endList) {
-                                    const cur = hls.media.currentTime;
-                                    const dur = hls.media.duration || 0;
-                                    if (cur < dur) {
-                                        data.frag.endList = undefined;
-                                        // 根据 tmp_time_add 调整 buffer 长度
-                                        hls.config.maxBufferLength = tmp_time_add < 1
-                                            ? 2
-                                            : tmp_max_buffer_length;
-                                        // 重新加载并跳转
-                                        hls.loadSource(video.src);
-                                        hls.attachMedia(video);
-                                        hls.media.currentTime = cur + tmp_time_add;
-                                        // 切换下次跳转时长：0.1 ↔ 5
-                                        tmp_time_add = tmp_time_add < 1 ? 5 : 0.1;
-                                        player.video.play().catch(() => {});
-                                    } else {
-                                        player.video.pause();
-                                    }
-                                }
-                            });
                         }
                     }
-                }
+            }
             });
             // 全屏模式下锁定横屏
             dp.on('fullscreen', () => {
@@ -898,22 +875,12 @@
         // M3U8清单广告过滤函数
         function filterAdsFromM3U8(m3u8Content, strictMode = false) {
             if (!m3u8Content) return '';
-            
-            // 按行分割M3U8内容
-            const lines = m3u8Content.split('\n');
-            const filteredLines = [];
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                
-                // 只过滤#EXT-X-DISCONTINUITY标识
-                if (!line.includes('#EXT-X-DISCONTINUITY')) {
-                    filteredLines.push(line);
-                }
-            }
-            
-            return filteredLines.join('\n');
+
+            let pattern = window.filterAdPattern;
+            const regex = new RegExp(pattern, 'g');
+            return m3u8Content.replace(regex, '');
         }
+        
 
         // 显示错误
         function showError(message) {
@@ -1031,6 +998,7 @@
             // 获取当前URL参数，保留source参数
             const urlParams = new URLSearchParams(window.location.search);
             const sourceName = urlParams.get('source') || '';
+            const sourceCode = urlParams.get('source_code') || '';
             
             // 更新URL，不刷新页面，保留source参数
             const newUrl = new URL(window.location.href);
@@ -1038,6 +1006,9 @@
             newUrl.searchParams.set('url', url);
             if (sourceName) {
                 newUrl.searchParams.set('source', sourceName);
+            }
+            if (sourceCode) {
+                newUrl.searchParams.set('source_code', sourceCode);
             }
             window.history.pushState({}, '', newUrl);
             
@@ -1055,16 +1026,16 @@
                         playPromise.catch(error => {
                             console.warn('播放失败，尝试重新初始化:', error);
                             // 如果切换视频失败，重新初始化播放器
-                            initPlayer(url);
+                            initPlayer(url, sourceCode);
                         });
                     }
                 } catch (e) {
                     console.error('切换视频出错，尝试重新初始化:', e);
                     // 如果出错，重新初始化播放器
-                    initPlayer(url);
+                    initPlayer(url, sourceCode);
                 }
             } else {
-                initPlayer(url);
+                initPlayer(url, sourceCode);
             }
             
             // 更新UI
@@ -1204,6 +1175,7 @@
             // 尝试从URL中获取参数
             const urlParams = new URLSearchParams(window.location.search);
             const sourceName = urlParams.get('source') || '';
+            const sourceCode = urlParams.get('source_code') || '';
 
             // 获取当前播放进度
             let currentPosition = 0;
@@ -1218,7 +1190,7 @@
             const videoInfo = {
                 title: currentVideoTitle,
                 // 创建基础URL，使用标题作为唯一标识符
-                url: `player.html?title=${encodeURIComponent(currentVideoTitle)}&source=${encodeURIComponent(sourceName)}`,
+                url: `player.html?title=${encodeURIComponent(currentVideoTitle)}&source=${encodeURIComponent(sourceName)}&source_code=${encodeURIComponent(sourceCode)}`,
                 episodeIndex: currentEpisodeIndex,
                 sourceName: sourceName,
                 timestamp: Date.now(),
