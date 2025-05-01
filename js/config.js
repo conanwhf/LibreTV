@@ -50,10 +50,6 @@ const API_SITES = {
         api: 'https://wolongzyw.com',
         name: '卧龙资源',
     },
-    cjhw: {
-        api: 'https://cjhwba.com',
-        name: '新华为',
-    },
     hwba: {
         api: 'https://cjwba.com',
         name: '华为吧资源',
